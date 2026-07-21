@@ -3,7 +3,7 @@ import re
 from functools import partial
 from glob import has_magic
 from pathlib import Path, PurePath
-from typing import Callable, Optional, Union
+from typing import Callable, Literal, Optional, Union, overload
 
 import huggingface_hub
 from fsspec.core import url_to_fs
@@ -296,6 +296,26 @@ def _get_data_files_patterns(pattern_resolver: Callable[[str], list[str]]) -> di
         if non_empty_splits:
             return {split: patterns_dict[split] for split in non_empty_splits}
     raise FileNotFoundError(f"Couldn't resolve pattern {pattern} with resolver {pattern_resolver}")
+
+
+@overload
+def resolve_pattern(
+    pattern: str,
+    base_path: str,
+    allowed_extensions: Optional[list[str]] = ...,
+    download_config: Optional[DownloadConfig] = ...,
+    return_metadata: Literal[False] = ...,
+) -> list[str]: ...
+
+
+@overload
+def resolve_pattern(
+    pattern: str,
+    base_path: str,
+    allowed_extensions: Optional[list[str]] = ...,
+    download_config: Optional[DownloadConfig] = ...,
+    return_metadata: Literal[True] = ...,
+) -> tuple[list[str], list[SingleOriginMetadata]]: ...
 
 
 def resolve_pattern(

@@ -189,6 +189,7 @@ def test_resolve_pattern_locally_with_metadata(complex_data_dir, pattern, patter
         resolved_data_files, origin_metadata = resolve_pattern(pattern, complex_data_dir, return_metadata=True)
         assert sorted(str(f) for f in resolved_data_files) == pattern_results[pattern]
         assert len(resolved_data_files) == len(origin_metadata)
+        assert all(isinstance(meta, tuple) for meta in origin_metadata)
     except FileNotFoundError:
         assert len(pattern_results[pattern]) == 0
 
@@ -313,6 +314,7 @@ def test_resolve_pattern_in_dataset_repository_with_metadata(hub_dataset_repo_pa
         resolved_data_files, origin_metadata = resolve_pattern(pattern, hub_dataset_repo_path, return_metadata=True)
         assert sorted(str(f) for f in resolved_data_files) == hub_dataset_repo_patterns_results[pattern]
         assert len(resolved_data_files) == len(origin_metadata)
+        assert all(isinstance(meta, tuple) for meta in origin_metadata)
     except FileNotFoundError:
         assert len(hub_dataset_repo_patterns_results[pattern]) == 0
 
