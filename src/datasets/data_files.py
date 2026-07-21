@@ -303,7 +303,8 @@ def resolve_pattern(
     base_path: str,
     allowed_extensions: Optional[list[str]] = None,
     download_config: Optional[DownloadConfig] = None,
-) -> list[str]:
+    return_metadata: bool = False,
+) -> Union[list[str], tuple[list[str], list[SingleOriginMetadata]]]:
     """
     Resolve the paths and URLs of the data files from the pattern passed by the user.
 
@@ -369,6 +370,7 @@ def resolve_pattern(
     # if the pattern contains hops like "zip://csv/*.csv::data.zip", we need to keep them after globbing
     _, *rest_hops = pattern.split("::")
     matched_paths = []
+    matched_metadata = []
     for filepath, info in fs.glob(fs_pattern, detail=True, **glob_kwargs).items():
         if not (info["type"] == "file" or (info.get("islink") and os.path.isfile(os.path.realpath(filepath)))) or (
             xbasename(filepath) in files_to_ignore
@@ -378,17 +380,33 @@ def resolve_pattern(
             continue
         if _is_unrequested_hidden_file_or_is_inside_unrequested_hidden_dir(filepath, fs_pattern):
             continue
+
+        if return_metadata:
+            meta = ()
+            if isinstance(fs, HfFileSystem):
+                resolved_path = fs.resolve_path(filepath)
+                if hasattr(resolved_path, "revision"):
+                    meta = (resolved_path.repo_id, resolved_path.revision)
+            if not meta:
+                for key in ["ETag", "etag", "mtime"]:
+                    if key in info:
+                        meta = (str(info[key]),)
+                        break
+            matched_metadata.append(meta)
+
         filepath = filepath if "://" in filepath else protocol_prefix + filepath
         if rest_hops:
             filepath = "::".join([filepath] + rest_hops)
         matched_paths.append(filepath)
     # ignore .ipynb and __pycache__, but keep /../
     if allowed_extensions is not None:
-        out = [
-            filepath
-            for filepath in matched_paths
-            if any("." + suffix in allowed_extensions for suffix in xbasename(filepath).split(".")[1:])
-        ]
+        out = []
+        out_metadata = []
+        for i, filepath in enumerate(matched_paths):
+            if any("." + suffix in allowed_extensions for suffix in xbasename(filepath).split(".")[1:]):
+                out.append(filepath)
+                if return_metadata:
+                    out_metadata.append(matched_metadata[i])
         if len(out) < len(matched_paths):
             invalid_matched_files = list(set(matched_paths) - set(out))
             logger.info(
@@ -396,12 +414,13 @@ def resolve_pattern(
             )
     else:
         out = matched_paths
+        out_metadata = matched_metadata
     if not out:
         error_msg = f"Unable to find '{pattern}'"
         if allowed_extensions is not None:
             error_msg += f" with any supported extension {list(allowed_extensions)}"
         raise FileNotFoundError(error_msg)
-    return out
+    return (out, out_metadata) if return_metadata else out
 
 
 def get_data_patterns(base_path: str, download_config: Optional[DownloadConfig] = None) -> dict[str, list[str]]:
@@ -610,20 +629,21 @@ class DataFilesList(list[str]):
     ) -> "DataFilesList":
         base_path = base_path if base_path is not None else Path().resolve().as_posix()
         data_files = []
+        origin_metadata = []
         for pattern in patterns:
             try:
-                data_files.extend(
-                    resolve_pattern(
-                        pattern,
-                        base_path=base_path,
-                        allowed_extensions=allowed_extensions,
-                        download_config=download_config,
-                    )
+                resolved_paths, resolved_metadata = resolve_pattern(
+                    pattern,
+                    base_path=base_path,
+                    allowed_extensions=allowed_extensions,
+                    download_config=download_config,
+                    return_metadata=True,
                 )
+                data_files.extend(resolved_paths)
+                origin_metadata.extend(resolved_metadata)
             except FileNotFoundError:
                 if not has_magic(pattern):
                     raise
-        origin_metadata = _get_origin_metadata(data_files, download_config=download_config)
         return cls(data_files, origin_metadata)
 
     def filter(
@@ -769,20 +789,21 @@ class DataFilesPatternsList(list[str]):
     ) -> "DataFilesList":
         base_path = base_path if base_path is not None else Path().resolve().as_posix()
         data_files = []
+        origin_metadata = []
         for pattern, allowed_extensions in zip(self, self.allowed_extensions):
             try:
-                data_files.extend(
-                    resolve_pattern(
-                        pattern,
-                        base_path=base_path,
-                        allowed_extensions=allowed_extensions,
-                        download_config=download_config,
-                    )
+                resolved_paths, resolved_metadata = resolve_pattern(
+                    pattern,
+                    base_path=base_path,
+                    allowed_extensions=allowed_extensions,
+                    download_config=download_config,
+                    return_metadata=True,
                 )
+                data_files.extend(resolved_paths)
+                origin_metadata.extend(resolved_metadata)
             except FileNotFoundError:
                 if not has_magic(pattern):
                     raise
-        origin_metadata = _get_origin_metadata(data_files, download_config=download_config)
         return DataFilesList(data_files, origin_metadata)
 
     def filter_extensions(self, extensions: list[str]) -> "DataFilesPatternsList":
