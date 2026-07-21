@@ -183,6 +183,16 @@ def test_resolve_pattern_locally(complex_data_dir, pattern, pattern_results):
         assert len(pattern_results[pattern]) == 0
 
 
+@pytest.mark.parametrize("pattern", _TEST_PATTERNS)
+def test_resolve_pattern_locally_with_metadata(complex_data_dir, pattern, pattern_results):
+    try:
+        resolved_data_files, origin_metadata = resolve_pattern(pattern, complex_data_dir, return_metadata=True)
+        assert sorted(str(f) for f in resolved_data_files) == pattern_results[pattern]
+        assert len(resolved_data_files) == len(origin_metadata)
+    except FileNotFoundError:
+        assert len(pattern_results[pattern]) == 0
+
+
 def test_resolve_pattern_locally_with_dot_in_base_path(complex_data_dir):
     base_path_with_dot = os.path.join(complex_data_dir, "data", ".dummy_subdir")
     resolved_data_files = resolve_pattern(os.path.join(base_path_with_dot, "train.txt"), base_path_with_dot)
@@ -293,6 +303,16 @@ def test_resolve_pattern_in_dataset_repository(hub_dataset_repo_path, pattern, h
     try:
         resolved_data_files = resolve_pattern(pattern, hub_dataset_repo_path)
         assert sorted(str(f) for f in resolved_data_files) == hub_dataset_repo_patterns_results[pattern]
+    except FileNotFoundError:
+        assert len(hub_dataset_repo_patterns_results[pattern]) == 0
+
+
+@pytest.mark.parametrize("pattern", _TEST_PATTERNS)
+def test_resolve_pattern_in_dataset_repository_with_metadata(hub_dataset_repo_path, pattern, hub_dataset_repo_patterns_results):
+    try:
+        resolved_data_files, origin_metadata = resolve_pattern(pattern, hub_dataset_repo_path, return_metadata=True)
+        assert sorted(str(f) for f in resolved_data_files) == hub_dataset_repo_patterns_results[pattern]
+        assert len(resolved_data_files) == len(origin_metadata)
     except FileNotFoundError:
         assert len(hub_dataset_repo_patterns_results[pattern]) == 0
 

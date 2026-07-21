@@ -514,58 +514,6 @@ def get_data_patterns(base_path: str, download_config: Optional[DownloadConfig] 
         raise EmptyDatasetError(f"The directory at {base_path} doesn't contain any data files") from None
 
 
-def _get_single_origin_metadata(
-    data_file: str,
-    download_config: Optional[DownloadConfig] = None,
-) -> SingleOriginMetadata:
-    if data_file.startswith(config.HF_ENDPOINT):
-        fs = HfFileSystem(endpoint=config.HF_ENDPOINT, token=download_config.token)
-        data_file = "hf://" + data_file[len(config.HF_ENDPOINT) + 1 :]
-        data_file = data_file.replace("/resolve/", "/" if data_file.startswith("hf://buckets/") else "@", 1)
-        fs_path = data_file
-    else:
-        data_file, storage_options = _prepare_path_and_storage_options(data_file, download_config=download_config)
-        fs, fs_path = url_to_fs(data_file, **storage_options)
-    if isinstance(fs, HfFileSystem):
-        resolved_path = fs.resolve_path(fs_path)
-        if hasattr(resolved_path, "revision"):  # no revision for buckets
-            return resolved_path.repo_id, resolved_path.revision
-    info = fs.info(fs_path)
-    # s3fs uses "ETag", gcsfs uses "etag", and for local we simply check mtime
-    for key in ["ETag", "etag", "mtime"]:
-        if key in info:
-            return (str(info[key]),)
-    return ()
-
-
-def _get_origin_metadata(
-    data_files: list[str],
-    download_config: Optional[DownloadConfig] = None,
-    max_workers: Optional[int] = None,
-) -> list[SingleOriginMetadata]:
-    max_workers = max_workers if max_workers is not None else config.HF_DATASETS_MULTITHREADING_MAX_WORKERS
-    if all("hf://" in data_file for data_file in data_files):
-        # No need for multithreading here since the origin metadata of HF files
-        # is (repo_id, revision) and is cached after first .info() call.
-        return [
-            _get_single_origin_metadata(data_file, download_config=download_config)
-            for data_file in hf_tqdm(
-                data_files,
-                desc="Resolving data files",
-                # set `disable=None` rather than `disable=False` by default to disable progress bar when no TTY attached
-                disable=len(data_files) <= 16 or None,
-            )
-        ]
-    return thread_map(
-        partial(_get_single_origin_metadata, download_config=download_config),
-        data_files,
-        max_workers=max_workers,
-        tqdm_class=hf_tqdm,
-        desc="Resolving data files",
-        # set `disable=None` rather than `disable=False` by default to disable progress bar when no TTY attached
-        disable=len(data_files) <= 16 or None,
-    )
-
 
 class DataFilesList(list[str]):
     """
