@@ -326,6 +326,7 @@ def _resolve_pattern(
     allowed_extensions: Optional[list[str]] = None,
     download_config: Optional[DownloadConfig] = None,
     with_metadata: bool = False,
+    max_workers: Optional[int] = None,
 ) -> tuple[list[str], list[SingleOriginMetadata]]:
     """
     Resolve the paths and URLs of the data files from the pattern passed by the user.
@@ -435,7 +436,7 @@ def _resolve_pattern(
         missing_metadata_indices = [i for i, meta in enumerate(out_metadata) if not meta]
         if missing_metadata_indices:
             data_files = [out[i] for i in missing_metadata_indices]
-            max_workers = 64
+            max_workers = max_workers if max_workers is not None else config.HF_DATASETS_MULTITHREADING_MAX_WORKERS
             missing_metadata = thread_map(
                 partial(_get_single_origin_metadata, download_config=download_config),
                 data_files,
