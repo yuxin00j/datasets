@@ -424,7 +424,9 @@ def _resolve_pattern(
             missing_metadata = thread_map(
                 get_metadata,
                 [out[i] for i in missing_metadata_indices],
-                disable=True,
+                tqdm_class=hf_tqdm,
+                desc="Resolving data files",
+                disable=len(missing_metadata_indices) <= 16 or None,
                 max_workers=64,
             )
             for i, meta in zip(missing_metadata_indices, missing_metadata):

@@ -186,7 +186,7 @@ def test_resolve_pattern_locally(complex_data_dir, pattern, pattern_results):
 @pytest.mark.parametrize("pattern", _TEST_PATTERNS)
 def test_resolve_pattern_locally_with_metadata(complex_data_dir, pattern, pattern_results):
     try:
-        resolved_data_files, origin_metadata = resolve_pattern(pattern, complex_data_dir, return_metadata=True)
+        resolved_data_files, origin_metadata = _resolve_pattern(pattern, complex_data_dir, with_metadata=True)
         assert sorted(str(f) for f in resolved_data_files) == pattern_results[pattern]
         assert len(resolved_data_files) == len(origin_metadata)
         assert all(isinstance(meta, tuple) for meta in origin_metadata)
@@ -311,7 +311,7 @@ def test_resolve_pattern_in_dataset_repository(hub_dataset_repo_path, pattern, h
 @pytest.mark.parametrize("pattern", _TEST_PATTERNS)
 def test_resolve_pattern_in_dataset_repository_with_metadata(hub_dataset_repo_path, pattern, hub_dataset_repo_patterns_results):
     try:
-        resolved_data_files, origin_metadata = resolve_pattern(pattern, hub_dataset_repo_path, return_metadata=True)
+        resolved_data_files, origin_metadata = _resolve_pattern(pattern, hub_dataset_repo_path, with_metadata=True)
         assert sorted(str(f) for f in resolved_data_files) == hub_dataset_repo_patterns_results[pattern]
         assert len(resolved_data_files) == len(origin_metadata)
         assert all(isinstance(meta, tuple) for meta in origin_metadata)
@@ -712,3 +712,30 @@ def test_get_data_patterns_from_directory_with_the_word_data_twice(tmp_path):
     data_file.touch()
     data_file_patterns = get_data_patterns(repo_dir.as_posix())
     assert data_file_patterns == {"train": ["data/train-[0-9][0-9][0-9][0-9][0-9]-of-[0-9][0-9][0-9][0-9][0-9]*.*"]}
+
+@patch("datasets.data_files.fsspec.filesystem")
+def test_resolve_pattern_missing_metadata_fallback(mock_filesystem):
+    class MockFS:
+        def glob(self, pattern, detail=False):
+            if detail:
+                return {"foo/file1.txt": {"type": "file", "name": "foo/file1.txt"}} # missing size/mtime
+            else:
+                return ["foo/file1.txt"]
+        
+        def filterdir(self, paths):
+            return paths
+
+        def info(self, path, **kwargs):
+            return {"type": "file", "name": path, "size": 100, "mtime": 12345}
+            
+        def isfile(self, path):
+            return True
+        
+        def _strip_protocol(self, path):
+            return path
+            
+    mock_filesystem.return_value = MockFS()
+    out, md = _resolve_pattern("*.txt", "", with_metadata=True)
+    assert len(out) == 1
+    assert md[0][1] == 100
+
