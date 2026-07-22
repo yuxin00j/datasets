@@ -298,6 +298,28 @@ def _get_data_files_patterns(pattern_resolver: Callable[[str], list[str]]) -> di
     raise FileNotFoundError(f"Couldn't resolve pattern {pattern} with resolver {pattern_resolver}")
 
 
+def _get_single_origin_metadata(
+    data_file: str, download_config: Optional[DownloadConfig] = None
+) -> SingleOriginMetadata:
+    data_file, storage_options = _prepare_path_and_storage_options(data_file, download_config=download_config)
+    data_file = data_file.split("::")[0]
+    fs, _ = url_to_fs(data_file, **storage_options)
+    
+    filepath = data_file.split("://")[-1] if "://" in data_file else data_file
+    
+    if isinstance(fs, HfFileSystem):
+        resolved_path = fs.resolve_path(filepath)
+        if hasattr(resolved_path, "revision"):
+            return (resolved_path.repo_id, resolved_path.revision)
+            
+    info = fs.info(filepath)
+    for key in ["ETag", "etag", "mtime"]:
+        if key in info:
+            return (str(info[key]),)
+            
+    return ()
+
+
 def _resolve_pattern(
     pattern: str,
     base_path: str,
@@ -412,22 +434,16 @@ def _resolve_pattern(
     if with_metadata:
         missing_metadata_indices = [i for i, meta in enumerate(out_metadata) if not meta]
         if missing_metadata_indices:
-            def get_metadata(filepath: str) -> SingleOriginMetadata:
-                filepath = filepath.split("::")[0]
-                filepath = filepath.split("://")[-1] if "://" in filepath else filepath
-                info = fs.info(filepath)
-                for key in ["ETag", "etag", "mtime"]:
-                    if key in info:
-                        return (str(info[key]),)
-                return ()
-
+            data_files = [out[i] for i in missing_metadata_indices]
+            max_workers = 64
             missing_metadata = thread_map(
-                get_metadata,
-                [out[i] for i in missing_metadata_indices],
+                partial(_get_single_origin_metadata, download_config=download_config),
+                data_files,
+                max_workers=max_workers,
                 tqdm_class=hf_tqdm,
                 desc="Resolving data files",
-                disable=len(missing_metadata_indices) <= 16 or None,
-                max_workers=64,
+                # set `disable=None` rather than `disable=False` by default to disable progress bar when no TTY attached
+                disable=len(data_files) <= 16 or None,
             )
             for i, meta in zip(missing_metadata_indices, missing_metadata):
                 out_metadata[i] = meta
