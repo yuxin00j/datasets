@@ -298,33 +298,13 @@ def _get_data_files_patterns(pattern_resolver: Callable[[str], list[str]]) -> di
     raise FileNotFoundError(f"Couldn't resolve pattern {pattern} with resolver {pattern_resolver}")
 
 
-@overload
-def resolve_pattern(
-    pattern: str,
-    base_path: str,
-    allowed_extensions: Optional[list[str]] = ...,
-    download_config: Optional[DownloadConfig] = ...,
-    return_metadata: Literal[False] = ...,
-) -> list[str]: ...
-
-
-@overload
-def resolve_pattern(
-    pattern: str,
-    base_path: str,
-    allowed_extensions: Optional[list[str]] = ...,
-    download_config: Optional[DownloadConfig] = ...,
-    return_metadata: Literal[True] = ...,
-) -> tuple[list[str], list[SingleOriginMetadata]]: ...
-
-
-def resolve_pattern(
+def _resolve_pattern(
     pattern: str,
     base_path: str,
     allowed_extensions: Optional[list[str]] = None,
     download_config: Optional[DownloadConfig] = None,
-    return_metadata: bool = False,
-) -> Union[list[str], tuple[list[str], list[SingleOriginMetadata]]]:
+    with_metadata: bool = False,
+) -> tuple[list[str], list[SingleOriginMetadata]]:
     """
     Resolve the paths and URLs of the data files from the pattern passed by the user.
 
@@ -389,8 +369,9 @@ def resolve_pattern(
 
     # if the pattern contains hops like "zip://csv/*.csv::data.zip", we need to keep them after globbing
     _, *rest_hops = pattern.split("::")
-    matched_paths = []
-    matched_metadata = []
+    out = []
+    out_metadata = []
+    invalid_matched_files = []
     for filepath, info in fs.glob(fs_pattern, detail=True, **glob_kwargs).items():
         if not (info["type"] == "file" or (info.get("islink") and os.path.isfile(os.path.realpath(filepath)))) or (
             xbasename(filepath) in files_to_ignore
@@ -401,7 +382,15 @@ def resolve_pattern(
         if _is_unrequested_hidden_file_or_is_inside_unrequested_hidden_dir(filepath, fs_pattern):
             continue
 
-        if return_metadata:
+        filepath = filepath if "://" in filepath else protocol_prefix + filepath
+        if rest_hops:
+            filepath = "::".join([filepath] + rest_hops)
+
+        if allowed_extensions is not None and not any("." + suffix in allowed_extensions for suffix in xbasename(filepath).split(".")[1:]):
+            invalid_matched_files.append(filepath)
+            continue
+
+        if with_metadata:
             meta = ()
             if isinstance(fs, HfFileSystem):
                 resolved_path = fs.resolve_path(filepath)
@@ -412,35 +401,107 @@ def resolve_pattern(
                     if key in info:
                         meta = (str(info[key]),)
                         break
-            matched_metadata.append(meta)
+            out_metadata.append(meta)
+        out.append(filepath)
 
-        filepath = filepath if "://" in filepath else protocol_prefix + filepath
-        if rest_hops:
-            filepath = "::".join([filepath] + rest_hops)
-        matched_paths.append(filepath)
-    # ignore .ipynb and __pycache__, but keep /../
-    if allowed_extensions is not None:
-        out = []
-        out_metadata = []
-        for i, filepath in enumerate(matched_paths):
-            if any("." + suffix in allowed_extensions for suffix in xbasename(filepath).split(".")[1:]):
-                out.append(filepath)
-                if return_metadata:
-                    out_metadata.append(matched_metadata[i])
-        if len(out) < len(matched_paths):
-            invalid_matched_files = list(set(matched_paths) - set(out))
-            logger.info(
-                f"Some files matched the pattern '{pattern}' but don't have valid data file extensions: {invalid_matched_files}"
+    if allowed_extensions is not None and invalid_matched_files:
+        logger.info(
+            f"Some files matched the pattern '{pattern}' but don't have valid data file extensions: {invalid_matched_files}"
+        )
+
+    if with_metadata:
+        missing_metadata_indices = [i for i, meta in enumerate(out_metadata) if not meta]
+        if missing_metadata_indices:
+            def get_metadata(filepath: str) -> SingleOriginMetadata:
+                filepath = filepath.split("::")[0]
+                filepath = filepath.split("://")[-1] if "://" in filepath else filepath
+                info = fs.info(filepath)
+                for key in ["ETag", "etag", "mtime"]:
+                    if key in info:
+                        return (str(info[key]),)
+                return ()
+
+            missing_metadata = thread_map(
+                get_metadata,
+                [out[i] for i in missing_metadata_indices],
+                disable=True,
+                max_workers=64,
             )
-    else:
-        out = matched_paths
-        out_metadata = matched_metadata
+            for i, meta in zip(missing_metadata_indices, missing_metadata):
+                out_metadata[i] = meta
+
     if not out:
         error_msg = f"Unable to find '{pattern}'"
         if allowed_extensions is not None:
             error_msg += f" with any supported extension {list(allowed_extensions)}"
         raise FileNotFoundError(error_msg)
-    return (out, out_metadata) if return_metadata else out
+    return out, out_metadata
+
+
+@overload
+def resolve_pattern(
+    pattern: str,
+    base_path: str,
+    allowed_extensions: Optional[list[str]] = ...,
+    download_config: Optional[DownloadConfig] = ...,
+) -> list[str]: ...
+
+
+def resolve_pattern(
+    pattern: str,
+    base_path: str,
+    allowed_extensions: Optional[list[str]] = None,
+    download_config: Optional[DownloadConfig] = None,
+) -> list[str]:
+    """
+    Resolve the paths and URLs of the data files from the pattern passed by the user.
+
+    You can use patterns to resolve multiple local files. Here are a few examples:
+    - *.csv to match all the CSV files at the first level
+    - **.csv to match all the CSV files at any level
+    - data/* to match all the files inside "data"
+    - data/** to match all the files inside "data" and its subdirectories
+
+    The patterns are resolved using the fsspec glob. In fsspec>=2023.12.0 this is equivalent to
+    Python's glob.glob, Path.glob, Path.match and fnmatch where ** is unsupported with a prefix/suffix
+    other than a forward slash /.
+
+    More generally:
+    - '*' matches any character except a forward-slash (to match just the file or directory name)
+    - '**' matches any character including a forward-slash /
+
+    Hidden files and directories (i.e. whose names start with a dot) are ignored, unless they are explicitly requested.
+    The same applies to special directories that start with a double underscore like "__pycache__".
+    You can still include one if the pattern explicitly mentions it:
+    - to include a hidden file: "*/.hidden.txt" or "*/.*"
+    - to include a hidden directory: ".hidden/*" or ".*/*"
+    - to include a special directory: "__special__/*" or "__*/*"
+
+    Example::
+
+        >>> from datasets.data_files import resolve_pattern
+        >>> base_path = "."
+        >>> resolve_pattern("docs/**/*.py", base_path)
+        [/Users/mariosasko/Desktop/projects/datasets/docs/source/_config.py']
+
+    Args:
+        pattern (str): Unix pattern or paths or URLs of the data files to resolve.
+            The paths can be absolute or relative to base_path.
+            Remote filesystems using fsspec are supported, e.g. with the hf:// protocol.
+        base_path (str): Base path to use when resolving relative paths.
+        allowed_extensions (Optional[list], optional): White-list of file extensions to use. Defaults to None (all extensions).
+            For example: allowed_extensions=[".csv", ".json", ".txt", ".parquet"]
+        download_config ([`DownloadConfig`], *optional*): Specific download configuration parameters.
+    Returns:
+        List[str]: List of paths or URLs to the local or remote files that match the patterns.
+    """
+    return _resolve_pattern(
+        pattern,
+        base_path,
+        allowed_extensions=allowed_extensions,
+        download_config=download_config,
+        with_metadata=False,
+    )[0]
 
 
 def get_data_patterns(base_path: str, download_config: Optional[DownloadConfig] = None) -> dict[str, list[str]]:
@@ -600,12 +661,12 @@ class DataFilesList(list[str]):
         origin_metadata = []
         for pattern in patterns:
             try:
-                resolved_paths, resolved_metadata = resolve_pattern(
+                resolved_paths, resolved_metadata = _resolve_pattern(
                     pattern,
                     base_path=base_path,
                     allowed_extensions=allowed_extensions,
                     download_config=download_config,
-                    return_metadata=True,
+                    with_metadata=True,
                 )
                 data_files.extend(resolved_paths)
                 origin_metadata.extend(resolved_metadata)
@@ -760,12 +821,12 @@ class DataFilesPatternsList(list[str]):
         origin_metadata = []
         for pattern, allowed_extensions in zip(self, self.allowed_extensions):
             try:
-                resolved_paths, resolved_metadata = resolve_pattern(
+                resolved_paths, resolved_metadata = _resolve_pattern(
                     pattern,
                     base_path=base_path,
                     allowed_extensions=allowed_extensions,
                     download_config=download_config,
-                    return_metadata=True,
+                    with_metadata=True,
                 )
                 data_files.extend(resolved_paths)
                 origin_metadata.extend(resolved_metadata)
