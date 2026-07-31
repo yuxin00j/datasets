@@ -793,6 +793,8 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
         return self._state_dict
 
     def _iter_arrow(self):
+        if not self.ex_iterables:
+            return
         # we use this to buffer one example of each iterator to know if an iterator is exhausted
         nexts = [None] * len(self.ex_iterables)
         # because of that, we need to rewind 1 example when reloading the state dict
@@ -868,6 +870,8 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                 time.sleep(config.SLEEP_TIME_ON_THREADS_SHUTDOWN)
 
     def __iter__(self):
+        if not self.ex_iterables:
+            return
         # we use this to buffer one example of each iterator to know if an iterator is exhausted
         nexts = [None] * len(self.ex_iterables)
         # because of that, we need to rewind 1 example when reloading the state dict
@@ -1963,21 +1967,32 @@ class BufferShuffledExamplesIterable(_BaseExamplesIterable):
         yield from mem_buffer
 
     def _iter_arrow(self):
-        buffer_size = self.buffer_size
-        rng = deepcopy(self.generator)
-        indices_iterator = self._iter_random_indices(rng, buffer_size)
-        # this is the shuffle buffer that we keep in memory
-        mem_buffer = []
+        import pyarrow as pa
+        import pyarrow.compute as pc
+        
+        buffer_table = None
+        
         for key, pa_table in self.ex_iterable.iter_arrow():
-            if len(mem_buffer) == buffer_size:  # if the buffer is full, pick and example from it
-                i = next(indices_iterator)
-                yield mem_buffer[i]
-                mem_buffer[i] = (key, pa_table)  # replace the picked example by a new one
-            else:  # otherwise, keep filling the buffer
-                mem_buffer.append((key, pa_table))
-        # when we run out of examples, we shuffle the remaining examples in the buffer and yield them
-        rng.shuffle(mem_buffer)
-        yield from mem_buffer
+            if buffer_table is None:
+                buffer_table = pa_table
+            else:
+                buffer_table = pa.concat_tables([buffer_table, pa_table])
+                
+            if len(buffer_table) >= self.buffer_size:
+                # We have reached or exceeded buffer_size.
+                indices = self.generator.permutation(len(buffer_table))
+                shuffled_table = pc.take(buffer_table, indices)
+                
+                rows_to_yield = len(buffer_table) - self.buffer_size
+                if rows_to_yield > 0:
+                    yield "shuffled_block", shuffled_table.slice(0, rows_to_yield)
+                    buffer_table = shuffled_table.slice(rows_to_yield)
+                else:
+                    buffer_table = shuffled_table
+                    
+        if buffer_table is not None and len(buffer_table) > 0:
+            indices = self.generator.permutation(len(buffer_table))
+            yield "shuffled_block", pc.take(buffer_table, indices)
 
     def shuffle_data_sources(self, generator: np.random.Generator) -> "BufferShuffledExamplesIterable":
         """Shuffle the wrapped examples iterable as well as the shuffling buffer."""
@@ -3813,7 +3828,7 @@ class IterableDataset(DatasetInfoMixin):
         except DataSourcesShufflingDisallowed:
             max_buffer_input_shards = 1
         if ex_iterable.iter_arrow:
-            ex_iterable = RebatchedArrowExamplesIterable(ex_iterable, batch_size=1)
+            pass # RebatchedArrowExamplesIterable removed to allow chunk processing
         if max_buffer_input_shards > 1:
             num_shards_to_interleave = min(ex_iterable.num_shards, max_buffer_input_shards)
             ex_iterable = CyclingMultiSourcesExamplesIterable(
