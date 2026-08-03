@@ -1965,30 +1965,34 @@ class BufferShuffledExamplesIterable(_BaseExamplesIterable):
     def _iter_arrow(self):
         import pyarrow as pa
         import pyarrow.compute as pc
+        from copy import deepcopy
         
-        buffer_table = None
+        rng = deepcopy(self.generator)
+        tables = []
+        current_len = 0
+        last_key = None
         
         for key, pa_table in self.ex_iterable.iter_arrow():
-            if buffer_table is None:
-                buffer_table = pa_table
-            else:
-                buffer_table = pa.concat_tables([buffer_table, pa_table])
-                
-            if len(buffer_table) >= self.buffer_size:
-                # We have reached or exceeded buffer_size.
-                indices = self.generator.permutation(len(buffer_table))
+            last_key = key
+            tables.append(pa_table)
+            current_len += len(pa_table)
+            
+            # Amortize shuffle cost by waiting until buffer is 2x full
+            if current_len >= 2 * self.buffer_size:
+                buffer_table = pa.concat_tables(tables)
+                indices = rng.permutation(current_len)
                 shuffled_table = pc.take(buffer_table, indices)
                 
-                rows_to_yield = len(buffer_table) - self.buffer_size
-                if rows_to_yield > 0:
-                    yield "shuffled_block", shuffled_table.slice(0, rows_to_yield)
-                    buffer_table = shuffled_table.slice(rows_to_yield)
-                else:
-                    buffer_table = shuffled_table
-                    
-        if buffer_table is not None and len(buffer_table) > 0:
-            indices = self.generator.permutation(len(buffer_table))
-            yield "shuffled_block", pc.take(buffer_table, indices)
+                rows_to_yield = current_len - self.buffer_size
+                yield key, shuffled_table.slice(0, rows_to_yield)
+                
+                tables = [shuffled_table.slice(rows_to_yield)]
+                current_len = self.buffer_size
+                
+        if current_len > 0:
+            buffer_table = pa.concat_tables(tables)
+            indices = rng.permutation(current_len)
+            yield last_key, pc.take(buffer_table, indices)
 
     def shuffle_data_sources(self, generator: np.random.Generator) -> "BufferShuffledExamplesIterable":
         """Shuffle the wrapped examples iterable as well as the shuffling buffer."""
