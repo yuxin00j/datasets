@@ -793,8 +793,6 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
         return self._state_dict
 
     def _iter_arrow(self):
-        if not self.ex_iterables:
-            return
         # we use this to buffer one example of each iterator to know if an iterator is exhausted
         nexts = [None] * len(self.ex_iterables)
         # because of that, we need to rewind 1 example when reloading the state dict
@@ -870,8 +868,6 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                 time.sleep(config.SLEEP_TIME_ON_THREADS_SHUTDOWN)
 
     def __iter__(self):
-        if not self.ex_iterables:
-            return
         # we use this to buffer one example of each iterator to know if an iterator is exhausted
         nexts = [None] * len(self.ex_iterables)
         # because of that, we need to rewind 1 example when reloading the state dict
