@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+  <link rel="icon" href="data:,">
+  <title>Codex Autoresearch Report - Improve IterableDataset shuffle duration on top of PR 8387 by optimizing PyArrow block shuffling and eliminating record-batch unwrapping overhead</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #647084; --line: #d7dde7; --panel: #f6f8fb; --blue: #2563eb; --green: #15803d; --red: #b42318; --amber: #a15c00; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #ffffff; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; letter-spacing: 0; }
+    header { border-bottom: 1px solid var(--line); background: #f9fafc; }
+    .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+    .header-inner { padding: 34px 0 30px; }
+    .product { margin: 0 0 8px; color: var(--blue); font-size: 13px; font-weight: 700; }
+    h1 { max-width: 900px; margin: 0; font-size: 30px; line-height: 1.2; font-weight: 720; overflow-wrap: anywhere; }
+    .header-meta { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 18px; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 9px; border: 1px solid currentColor; border-radius: 4px; font-weight: 700; }
+    .status.complete { color: var(--green); background: #f0fdf4; } .status.error { color: var(--red); background: #fef3f2; }
+    main { padding: 32px 0 64px; }
+    section { margin-top: 40px; }
+    section:first-child { margin-top: 0; }
+    h2 { margin: 0 0 16px; font-size: 20px; line-height: 1.3; font-weight: 700; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .card { padding: 18px 20px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+    .card-label { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card-value { margin-top: 8px; font-size: 24px; font-weight: 700; }
+    .card-sub { margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { padding: 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+    .badge.keep { color: var(--green); background: #f0fdf4; }
+    .badge.revert { color: var(--red); background: #fef3f2; }
+    .badge.baseline { color: var(--blue); background: #eff6ff; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12.5px; background: #f1f4f9; padding: 2px 5px; border-radius: 4px; }
+    .detail-row { font-size: 13px; color: var(--muted); margin-top: 4px; }
+    .improvement { color: var(--green); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap header-inner">
+      <p class="product">Codex Autoresearch Report</p>
+      <h1>Improve IterableDataset shuffle duration on top of PR 8387 by optimizing PyArrow block shuffling and eliminating record-batch unwrapping overhead</h1>
+      <div class="header-meta">
+        <span class="status complete">COMPLETE</span>
+        <span>Target: <strong>15.0s</strong> (lower is better)</span>
+        <span>Run ID: <code>f1a911c3027740b6b5d9a1c47f241a2e</code></span>
+        <span>Created: 2026-08-04 08:52 UTC</span>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <section>
+        <h2>Summary</h2>
+        <div class="summary-grid">
+          <div class="card">
+            <div class="card-label">Baseline Metric</div>
+            <div class="card-value">52.37s</div>
+            <div class="card-sub">Commit <code>a28ff3e</code> (PR 8387 Baseline)</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Best Retained Metric</div>
+            <div class="card-value improvement">11.57s</div>
+            <div class="card-sub">77.9% reduction in epoch time (-40.80s)</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Target Status</div>
+            <div class="card-value improvement">ACHIEVED</div>
+            <div class="card-sub">Target 15.00s beaten by 3.43s (22.9% faster)</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Iterations</div>
+            <div class="card-value">2</div>
+            <div class="card-sub">2 Kept, 0 Reverted</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Key Technical Discoveries & Fixes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Root Cause / Bottleneck Identified</th>
+                <th>Optimization Implemented</th>
+                <th>Metric Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Baseline</strong><br><code>a28ff3e</code></td>
+                <td>PR 8387 implemented random column shuffling per batch via <code>pa.concat_tables</code> and <code>pa.Table.from_arrays</code>, but slicing row groups into 1-row tables in <code>RebatchedArrowExamplesIterable(batch_size=1)</code> caused O(N) object allocations and slow row-by-row iteration.</td>
+                <td>Initial PR 8387 PyArrow table concatenation baseline.</td>
+                <td>52.37s</td>
+              </tr>
+              <tr>
+                <td><strong>Iteration 1</strong><br><code>e0d8e3c</code><br><span class="badge keep">KEEP</span></td>
+                <td>
+                  1. Shuffling rows individually inside Python loop created excessive temporary PyArrow table chunks.<br>
+                  2. Slicing row groups into 1-row batches when reading shards before shuffle buffer caused 1000x PyArrow object overhead.
+                </td>
+                <td>
+                  1. <strong>Amortized Native C++ Block Shuffling</strong>: Buffered tables up to <code>2 * buffer_size</code> (20,000 rows) and shuffled columns in C++ using <code>pyarrow.compute.take(table, indices)</code>.<br>
+                  2. <strong>Dynamic Balanced Rebatching</strong>: In <code>IterableDataset.shuffle()</code>, set <code>batch_size = max(1, buffer_size // max(1, mbis))</code> (=1,000 rows), reducing PyArrow allocations by 1,000x.
+                </td>
+                <td>29.14s<br><span class="improvement">(-44.4% vs baseline)</span></td>
+              </tr>
+              <tr>
+                <td><strong>Iteration 2</strong><br><code>64c4030</code><br><span class="badge keep">KEEP</span></td>
+                <td>
+                  1. <strong>3 of 4 DataLoader workers stopped</strong>: <code>CyclingMultiSourcesExamplesIterable.num_shards</code> returned <code>min()</code> (=1) instead of <code>sum()</code> (=8) when interleaving shards of a shuffled dataset. PyTorch DataLoader (4 workers) saw <code>num_shards=1 < 4</code>, killed workers 1, 2, and 3, and ran 100% of rows on worker 0.<br>
+                  2. <strong>PyArrow C++ Batch streaming broken</strong>: Since <code>1 % 4 != 0</code>, <code>_iter_pytorch()</code> wrapped the dataset in <code>StepExamplesIterable(step=4)</code>. This broke <code>.iter_arrow()</code>, forcing <code>FormattedExamplesIterable</code> to fall back to <code>__iter__()</code> and convert 700,000 rows individually in Python with 2,120,000 <code>state_dict()</code> calls.
+                </td>
+                <td>
+                  1. <strong>Enable <code>sum_shards=True</code> in <code>CyclingMultiSourcesExamplesIterable</code></strong>: When created by `.shuffle()`, `.num_shards` reports the sum of underlying shards (`8` instead of `1`), and <code>shard_data_sources</code> distributes shards evenly across DataLoader workers.<br>
+                  2. <strong>Clean Multi-Worker Arrow Streaming</strong>: Because <code>num_shards (8) % 4 == 0</code>, no workers are killed and no <code>StepExamplesIterable</code> fallback is triggered. All 4 workers stream and format batches in parallel at C++ speed without Python <code>state_dict()</code> overhead.<br>
+                  3. Removed thread-pool GIL contention from <code>CyclingMultiSourcesExamplesIterable._iter_arrow</code> and <code>__iter__</code>.
+                </td>
+                <td>11.57s<br><span class="improvement">(-77.9% vs baseline)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

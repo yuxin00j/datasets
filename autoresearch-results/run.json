@@ -1,0 +1,23 @@
+{
+  "background": null,
+  "branch": "optimize-pyarrow-block-shuffle",
+  "created_at": "2026-08-04T08:52:28Z",
+  "goal": "Improve IterableDataset shuffle duration on top of PR 8387 by optimizing PyArrow block shuffling and eliminating record-batch unwrapping overhead",
+  "guard": null,
+  "max_iterations": 5,
+  "metric": {
+    "command": "/usr/local/google/home/yuxinj/myrepo/datasets/verify_on_vm.sh",
+    "direction": "lower",
+    "json_key": "epoch_time",
+    "name": "epoch_time"
+  },
+  "mode": "foreground",
+  "repo": "/usr/local/google/home/yuxinj/myrepo/datasets",
+  "run_id": "f1a911c3027740b6b5d9a1c47f241a2e",
+  "schema_version": 1,
+  "scope": [
+    "src/datasets/iterable_dataset.py"
+  ],
+  "target": 30,
+  "timeout_seconds": 1800
+}
