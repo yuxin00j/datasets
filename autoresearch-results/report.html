@@ -114,7 +114,7 @@
                 <td>29.14s<br><span class="improvement">(-44.4% vs baseline)</span></td>
               </tr>
               <tr>
-                <td><strong>Iteration 2</strong><br><code>270d310</code><br><span class="badge keep">KEEP</span></td>
+                <td><strong>Iteration 2</strong><br><code>c8c7eb2</code><br><span class="badge keep">KEEP</span></td>
                 <td>
                   1. <strong>3 of 4 DataLoader workers stopped</strong>: <code>CyclingMultiSourcesExamplesIterable.num_shards</code> returned <code>min()</code> (=1) instead of <code>sum()</code> (=64) when interleaving shards of a shuffled dataset. PyTorch DataLoader (4 workers) saw <code>num_shards=1 < 4</code>, killed workers 1, 2, and 3, and ran 100% of rows on worker 0.<br>
                   2. <strong>PyArrow C++ Batch streaming broken</strong>: Because <code>num_shards</code> was misreported, <code>_iter_pytorch()</code> wrapped the dataset in <code>StepExamplesIterable(step=4)</code>. This broke <code>.iter_arrow()</code>, forcing <code>FormattedExamplesIterable</code> to fall back to <code>__iter__()</code> and convert 700,000 rows individually in Python with 2,120,000 <code>state_dict()</code> calls.
