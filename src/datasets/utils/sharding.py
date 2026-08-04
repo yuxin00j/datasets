@@ -15,7 +15,7 @@ def _number_of_shards_in_gen_kwargs(gen_kwargs: dict) -> int:
             + "and use tuples otherwise. In the end there should only be one single list, or several lists with the same length."
         )
     max_length = max(lists_lengths.values(), default=0)
-    return max(1, max_length)
+    return max(1, max_length) if max_length > 0 else 0
 
 
 def _distribute_shards(num_shards: int, max_num_jobs: int) -> list[range]:
@@ -65,6 +65,8 @@ def _split_gen_kwargs(gen_kwargs: dict, max_num_jobs: int) -> list[dict]:
 
 
 def _merge_gen_kwargs(gen_kwargs_list: list[dict]) -> dict:
+    if not gen_kwargs_list:
+        return {}
     return {
         key: [value for gen_kwargs in gen_kwargs_list for value in gen_kwargs[key]]
         if isinstance(gen_kwargs_list[0][key], list)

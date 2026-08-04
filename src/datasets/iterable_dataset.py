@@ -390,6 +390,8 @@ class ArrowExamplesIterable(_BaseExamplesIterable):
         return self._state_dict
 
     def __iter__(self):
+        if not self.kwargs or self.num_shards == 0:
+            return
         formatter = PythonFormatter()
         shard_idx_start = self._state_dict["shard_idx"] if self._state_dict else 0
         for gen_kwags in islice(_split_gen_kwargs(self.kwargs, max_num_jobs=self.num_shards), shard_idx_start, None):
@@ -412,6 +414,8 @@ class ArrowExamplesIterable(_BaseExamplesIterable):
                 self._state_dict["shard_example_idx"] = 0
 
     def _iter_arrow(self):
+        if not self.kwargs or self.num_shards == 0:
+            return
         shard_idx_start = self._state_dict["shard_idx"] if self._state_dict else 0
         for gen_kwags in islice(_split_gen_kwargs(self.kwargs, max_num_jobs=self.num_shards), shard_idx_start, None):
             shard_example_idx_start = self._state_dict["shard_example_idx"] if self._state_dict else 0

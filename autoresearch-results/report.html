@@ -66,13 +66,13 @@
           </div>
           <div class="card">
             <div class="card-label">Best Retained Metric</div>
-            <div class="card-value improvement">11.57s</div>
-            <div class="card-sub">77.9% reduction in epoch time (-40.80s)</div>
+            <div class="card-value improvement">14.15s</div>
+            <div class="card-sub">73.0% reduction in epoch time (-38.22s)</div>
           </div>
           <div class="card">
             <div class="card-label">Target Status</div>
             <div class="card-value improvement">ACHIEVED</div>
-            <div class="card-sub">Target 15.00s beaten by 3.43s (22.9% faster)</div>
+            <div class="card-sub">Target 15.00s beaten by 0.85s</div>
           </div>
           <div class="card">
             <div class="card-label">Iterations</div>
@@ -114,17 +114,17 @@
                 <td>29.14s<br><span class="improvement">(-44.4% vs baseline)</span></td>
               </tr>
               <tr>
-                <td><strong>Iteration 2</strong><br><code>64c4030</code><br><span class="badge keep">KEEP</span></td>
+                <td><strong>Iteration 2</strong><br><code>270d310</code><br><span class="badge keep">KEEP</span></td>
                 <td>
-                  1. <strong>3 of 4 DataLoader workers stopped</strong>: <code>CyclingMultiSourcesExamplesIterable.num_shards</code> returned <code>min()</code> (=1) instead of <code>sum()</code> (=8) when interleaving shards of a shuffled dataset. PyTorch DataLoader (4 workers) saw <code>num_shards=1 < 4</code>, killed workers 1, 2, and 3, and ran 100% of rows on worker 0.<br>
-                  2. <strong>PyArrow C++ Batch streaming broken</strong>: Since <code>1 % 4 != 0</code>, <code>_iter_pytorch()</code> wrapped the dataset in <code>StepExamplesIterable(step=4)</code>. This broke <code>.iter_arrow()</code>, forcing <code>FormattedExamplesIterable</code> to fall back to <code>__iter__()</code> and convert 700,000 rows individually in Python with 2,120,000 <code>state_dict()</code> calls.
+                  1. <strong>3 of 4 DataLoader workers stopped</strong>: <code>CyclingMultiSourcesExamplesIterable.num_shards</code> returned <code>min()</code> (=1) instead of <code>sum()</code> (=64) when interleaving shards of a shuffled dataset. PyTorch DataLoader (4 workers) saw <code>num_shards=1 < 4</code>, killed workers 1, 2, and 3, and ran 100% of rows on worker 0.<br>
+                  2. <strong>PyArrow C++ Batch streaming broken</strong>: Because <code>num_shards</code> was misreported, <code>_iter_pytorch()</code> wrapped the dataset in <code>StepExamplesIterable(step=4)</code>. This broke <code>.iter_arrow()</code>, forcing <code>FormattedExamplesIterable</code> to fall back to <code>__iter__()</code> and convert 700,000 rows individually in Python with 2,120,000 <code>state_dict()</code> calls.
                 </td>
                 <td>
-                  1. <strong>Enable <code>sum_shards=True</code> in <code>CyclingMultiSourcesExamplesIterable</code></strong>: When created by `.shuffle()`, `.num_shards` reports the sum of underlying shards (`8` instead of `1`), and <code>shard_data_sources</code> distributes shards evenly across DataLoader workers.<br>
-                  2. <strong>Clean Multi-Worker Arrow Streaming</strong>: Because <code>num_shards (8) % 4 == 0</code>, no workers are killed and no <code>StepExamplesIterable</code> fallback is triggered. All 4 workers stream and format batches in parallel at C++ speed without Python <code>state_dict()</code> overhead.<br>
+                  1. <strong>Enable <code>sum_shards=True</code> in <code>CyclingMultiSourcesExamplesIterable</code></strong>: When created by `.shuffle()`, `.num_shards` reports the sum of underlying shards (`64` instead of `1`), and <code>shard_data_sources</code> distributes shards evenly across DataLoader workers.<br>
+                  2. <strong>Clean Multi-Worker Arrow Streaming</strong>: Because <code>num_shards (64) % 4 == 0</code>, no workers are killed and no <code>StepExamplesIterable</code> fallback is triggered. All 4 workers stream and format batches in parallel at C++ speed without Python <code>state_dict()</code> overhead.<br>
                   3. Removed thread-pool GIL contention from <code>CyclingMultiSourcesExamplesIterable._iter_arrow</code> and <code>__iter__</code>.
                 </td>
-                <td>11.57s<br><span class="improvement">(-77.9% vs baseline)</span></td>
+                <td>14.15s<br><span class="improvement">(-73.0% vs baseline)</span></td>
               </tr>
             </tbody>
           </table>
