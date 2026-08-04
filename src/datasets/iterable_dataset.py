@@ -928,15 +928,10 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
     ) -> "CyclingMultiSourcesExamplesIterable":
         """Either keep only the requested shard, or propagate the request to the underlying iterable."""
         if self.sum_shards:
-            if num_shards <= len(self.ex_iterables):
-                sharded_ex_iterables = [
-                    self.ex_iterables[i] for i in range(index, len(self.ex_iterables), num_shards)
-                ]
-            else:
-                sharded_ex_iterables = [
-                    iterable.shard_data_sources(num_shards, index, contiguous=contiguous)
-                    for iterable in self.ex_iterables
-                ]
+            sharded_ex_iterables = [
+                iterable.shard_data_sources(num_shards, index, contiguous=contiguous)
+                for iterable in self.ex_iterables
+            ]
             return CyclingMultiSourcesExamplesIterable(
                 sharded_ex_iterables,
                 stopping_strategy=self.stopping_strategy,
