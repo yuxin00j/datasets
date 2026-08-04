@@ -747,10 +747,12 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
         stopping_strategy: Literal[
             "first_exhausted", "all_exhausted", "all_exhausted_without_replacement"
         ] = "first_exhausted",
+        sum_shards: bool = False,
     ):
         super().__init__()
         self.ex_iterables = ex_iterables
         self.stopping_strategy = stopping_strategy
+        self.sum_shards = sum_shards
 
         # if undersampling ("first_exhausted"), we stop as soon as one dataset is exhausted
         # if oversampling ("all_exhausted"), we stop as soons as every dataset is exhausted, i.e as soon as every samples of every dataset has been visited at least once
@@ -802,14 +804,7 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                     self.ex_iterables[i].load_state_dict(self._state_dict["previous_states"][i])
             previous_states = [ex_iterable.state_dict() for ex_iterable in self.ex_iterables]
         iterators = [ex_iterable.iter_arrow() for ex_iterable in self.ex_iterables]
-
-        # Pre-populate futures for next samples from each iterator using threads for prefetching
-        def fetch_next_sample(iterator):
-            return next(iterator, False)
-
-        # Use ThreadPoolExecutor to fetch next samples in parallel
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(self.ex_iterables))
-        futures = [executor.submit(fetch_next_sample, iterator) for iterator in iterators]
+        nexts = [next(it, False) for it in iterators]
 
         indices_iterator = self._get_indices_iterator()
 
@@ -825,23 +820,18 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                 if is_exhausted[i] and self.stopping_strategy in ["all_exhausted_without_replacement"]:
                     continue
                 # let's pick one example from the iterator at index i
-                # Resolve the future to get the current sample
                 if nexts[i] is None:
-                    nexts[i] = futures[i].result()
+                    nexts[i] = next(iterators[i], False)
                     if self._state_dict:
                         self._state_dict["previous_states"][i] = previous_states[i]
                         previous_states[i] = self.ex_iterables[i].state_dict()
-                    futures[i] = executor.submit(fetch_next_sample, iterators[i])
                 result = nexts[i]
-                # Fetch the next sample for this iterator (prefetching)
-                nexts[i] = futures[i].result()
+                nexts[i] = next(iterators[i], False)
                 if self._state_dict:
                     self._state_dict["previous_states"][i] = previous_states[i]
                     previous_states[i] = self.ex_iterables[i].state_dict()
 
-                if nexts[i] is not False:
-                    futures[i] = executor.submit(fetch_next_sample, iterators[i])
-                else:
+                if nexts[i] is False:
                     # the iterator is exhausted
                     is_exhausted[i] = True
                     if self._state_dict:
@@ -853,14 +843,10 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                             previous_states[i] = self.ex_iterables[i].state_dict()
                             self._state_dict["previous_states"][i] = None
                         iterators[i] = self.ex_iterables[i].iter_arrow()
-                        nexts[i] = None
-                        futures[i] = executor.submit(fetch_next_sample, iterators[i])
+                        nexts[i] = next(iterators[i], False)
                 if result is not False:
                     yield result
         finally:
-            # Related to https://github.com/apache/arrow/issues/45214
-            for future in futures:
-                future.result()
             while iterators:
                 iterator = iterators.pop()
                 del iterator
@@ -877,14 +863,7 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                     self.ex_iterables[i].load_state_dict(self._state_dict["previous_states"][i])
             previous_states = [ex_iterable.state_dict() for ex_iterable in self.ex_iterables]
         iterators = [iter(ex_iterable) for ex_iterable in self.ex_iterables]
-
-        # Pre-populate futures for next samples from each iterator using threads for prefetching
-        def fetch_next_sample(iterator):
-            return next(iterator, False)
-
-        # Use ThreadPoolExecutor to fetch next samples in parallel
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(self.ex_iterables))
-        futures = [executor.submit(fetch_next_sample, iterator) for iterator in iterators]
+        nexts = [next(it, False) for it in iterators]
 
         indices_iterator = self._get_indices_iterator()
 
@@ -900,23 +879,18 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                 if is_exhausted[i] and self.stopping_strategy in ["all_exhausted_without_replacement"]:
                     continue
                 # let's pick one example from the iterator at index i
-                # Resolve the future to get the current sample
                 if nexts[i] is None:
-                    nexts[i] = futures[i].result()
+                    nexts[i] = next(iterators[i], False)
                     if self._state_dict:
                         self._state_dict["previous_states"][i] = previous_states[i]
                         previous_states[i] = self.ex_iterables[i].state_dict()
-                    futures[i] = executor.submit(fetch_next_sample, iterators[i])
                 result = nexts[i]
-                # Fetch the next sample for this iterator (prefetching)
-                nexts[i] = futures[i].result()
+                nexts[i] = next(iterators[i], False)
                 if self._state_dict:
                     self._state_dict["previous_states"][i] = previous_states[i]
                     previous_states[i] = self.ex_iterables[i].state_dict()
 
-                if nexts[i] is not False:
-                    futures[i] = executor.submit(fetch_next_sample, iterators[i])
-                else:
+                if nexts[i] is False:
                     # the iterator is exhausted
                     is_exhausted[i] = True
                     if self._state_dict:
@@ -928,34 +902,46 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
                             previous_states[i] = self.ex_iterables[i].state_dict()
                             self._state_dict["previous_states"][i] = None
                         iterators[i] = iter(self.ex_iterables[i])
-                        nexts[i] = None
-                        futures[i] = executor.submit(fetch_next_sample, iterators[i])
+                        nexts[i] = next(iterators[i], False)
                 if result is not False:
                     yield result
         finally:
-            # Related to https://github.com/apache/arrow/issues/45214
-            for future in futures:
-                future.result()
             while iterators:
                 iterator = iterators.pop()
                 del iterator
-            executor.shutdown(wait=True)
             if any(ex_iterable.sleep_on_threads_shutdown for ex_iterable in self.ex_iterables):
                 time.sleep(config.SLEEP_TIME_ON_THREADS_SHUTDOWN)
 
     def shuffle_data_sources(self, generator: np.random.Generator) -> "CyclingMultiSourcesExamplesIterable":
         """Shuffle each underlying examples iterable."""
         ex_iterables = [ex_iterable.shuffle_data_sources(generator) for ex_iterable in self.ex_iterables]
-        return CyclingMultiSourcesExamplesIterable(ex_iterables, self.stopping_strategy)
+        return CyclingMultiSourcesExamplesIterable(ex_iterables, self.stopping_strategy, sum_shards=self.sum_shards)
 
     @property
     def num_shards(self) -> int:
+        if self.sum_shards:
+            return sum(ex_iterable.num_shards for ex_iterable in self.ex_iterables) if self.ex_iterables else 0
         return min(ex_iterable.num_shards for ex_iterable in self.ex_iterables) if self.ex_iterables else 0
 
     def shard_data_sources(
         self, num_shards: int, index: int, contiguous=True
     ) -> "CyclingMultiSourcesExamplesIterable":
         """Either keep only the requested shard, or propagate the request to the underlying iterable."""
+        if self.sum_shards:
+            if num_shards <= len(self.ex_iterables):
+                sharded_ex_iterables = [
+                    self.ex_iterables[i] for i in range(index, len(self.ex_iterables), num_shards)
+                ]
+            else:
+                sharded_ex_iterables = [
+                    iterable.shard_data_sources(num_shards, index, contiguous=contiguous)
+                    for iterable in self.ex_iterables
+                ]
+            return CyclingMultiSourcesExamplesIterable(
+                sharded_ex_iterables,
+                stopping_strategy=self.stopping_strategy,
+                sum_shards=self.sum_shards,
+            )
         if num_shards < self.num_shards:
             return CyclingMultiSourcesExamplesIterable(
                 [
@@ -982,6 +968,7 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
         return CyclingMultiSourcesExamplesIterable(
             [iterable.reshard_data_sources() for iterable in self.ex_iterables],
             stopping_strategy=self.stopping_strategy,
+            sum_shards=self.sum_shards,
         )
 
 
@@ -1212,8 +1199,9 @@ class RandomlyCyclingMultiSourcesExamplesIterable(CyclingMultiSourcesExamplesIte
         stopping_strategy: Literal[
             "first_exhausted", "all_exhausted", "all_exhausted_without_replacement"
         ] = "first_exhausted",
+        sum_shards: bool = False,
     ):
-        super().__init__(ex_iterables, stopping_strategy)
+        super().__init__(ex_iterables, stopping_strategy, sum_shards=sum_shards)
         self.generator = deepcopy(generator)
         self.probabilities = probabilities
 
@@ -3838,6 +3826,7 @@ class IterableDataset(DatasetInfoMixin):
                     for index in range(num_shards_to_interleave)
                 ],
                 stopping_strategy="all_exhausted_without_replacement",
+                sum_shards=True,
             )
         ex_iterable = BufferShuffledExamplesIterable(ex_iterable, buffer_size=buffer_size, generator=generator)
         return IterableDataset(
